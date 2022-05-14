@@ -6,36 +6,37 @@
  *   - simple
  *   - no need for worker threads
  * cons:
- *   - Error handling / shutdown is... not really handled
+ *   - BYO Error handling / management
  *   - Classic evented concurrency issues
  */
 
 import {exampleApiCall} from "./example-api.mjs"
 
-async function pollster (id, throwCount = null) {
+async function loop (id, signal, throwCount = null) {
   console.log(id, 'starting to poll')
   let count = 0
-  while (true) {
+  while (!signal.aborted) {
     if (throwCount && count >= throwCount) {
       throw new Error(`Purposefully throwing because ${count} >= ${throwCount}`)
     }
     await exampleApiCall()
-    console.log(id, 'polled')
+    console.log(id, 'polled', count, 'times')
     count++
   }
 }
 
-async function sleeper () {
+async function supervisor () {
+  const controller = new AbortController();
   console.log('starting to poll')
   const workers = Array.from({ length: 3 })
-    .map((_, idx) => pollster(idx, idx % 2 === 0 ? 2: null))
+    .map((_, idx) => loop(idx, controller.signal, idx % 2 === 0 ? 4: null))
   try {
-    await Promise
-      .all(workers)
+    await Promise.all(workers)
   } catch (error) {
-    console.log('fatal error', error)
-    // other workers will happily continue to work...
+    console.error('Error encountered, aborting', error)
+    // ensure all other work stops
+    controller.abort()
   }
 }
 
-await sleeper()
+await supervisor()
